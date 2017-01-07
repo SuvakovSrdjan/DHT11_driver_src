@@ -19,8 +19,6 @@
 MODULE_LICENSE("Dual BSD/GPL");
 
 #define BUF_LEN 80
-//Da vidim da li radi commit
-
 
 /* GPIO registers base address. */
 #define GPIO_BASE_ADDR (0x3F200000)
