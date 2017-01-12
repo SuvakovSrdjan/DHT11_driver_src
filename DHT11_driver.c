@@ -14,7 +14,8 @@
 #include <linux/hrtimer.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
-#include "ring_buffer.h"
+
+
 
 MODULE_LICENSE("Dual BSD/GPL");
 
@@ -151,8 +152,8 @@ module_exit(DHT11_driver_exit);
 //Driver major number
 int DHT11_device_major_number;
 
-//A ring buffer driver data_size
-RingBuffer DHT11_data_buffer[BUF_LEN];
+//A data buffer
+char DHT11_data_buffer[BUF_LEN][5];
 
 /* Blink timer vars. */
 static struct hrtimer blink_timer;
@@ -347,13 +348,28 @@ void SetGpioPinDirection(char pin, char direction)
     iowrite32(tmp, addr);
 }
 
+//Function to be called before writing data to the data buffer
+void SendInitSequence(char pin) {
+  /* Send init sequence to GPIO_04 */
+  //Init GPIO_04
+  //Set GPIO_04 direction to out to send init sequence
+  SetGpioPinDirection(pin , GPIO_DIRECTION_OUT);
+  //Send init sequence
+  //TODO: for 18us ClearGpioPinDirecton(GPIO_04 , PULL_DOWN); for 40us SetGpioPinDirection(GPIO_04 , PULL_UP);
+  //After init sequence the device is now sending data to GPIO_04
+  //Set GPIO_04 directon ti GPIO_DIRECTION_IN
+  SetGpioPinDirection(pin , GPIO_DIRECTION_IN);
+  printk(KERN_INFO "Device is now sending data to GPIO_04 PIN\n");
+}
+
 void ClearDataBuffer() {
-    int i = 0;
+    int i = 0 , j = 0;
 
     for(i = 0; i < BUF_LEN; i++) {
-        ringBufPutChar(buffer[i] , 0);
+        for(j = 0; j < 5; j++) {
+            DHT11_data_buffer[i][j] = 0;
+        }
     }
-
 }
 
 //Functon operations:
@@ -389,8 +405,10 @@ int DHT11_driver_init(void) {
     blink_timer.function = &blink_timer_callback;
     hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
 
-    //Init GPIO pins
-    ClearGpioPin(GPIO_04);
+    //Initialize the device to send data
+    SendInitSequence(GPIO_04);
+    //Fill the data buffer here
+    DHT11_driver_write_to_buffer(GPIO_4);
 
     return 0;
 fail:
@@ -412,37 +430,24 @@ void DHT11_driver_exit() {
   hrtimer_cancel(&blink_timer);
 
   //Clear GPIO pins
-  ClearGpioPin(GPIO_04);
+  SetInternalPullUpDown(GPIO_04 , PULL_NONE);
 }
 
-//Function to be called before writing data to the data buffer
-void SendInitSequence(char pin) {
-  /* Send init sequence to GPIO_04 */
-  //Init GPIO_04
-  //Set GPIO_04 direction to out to send init sequence
-  SetGpioPinDirection(pin , GPIO_DIRECTION_OUT);
-  //Send init sequence
-  //TODO: for 18us ClearGpioPinDirecton(GPIO_04 , PULL_DOWN); for 40us SetGpioPinDirection(GPIO_04 , PULL_UP);
-  //After init sequence the device is now sending data to GPIO_04
-  //Set GPIO_04 directon ti GPIO_DIRECTION_IN
-  SetGpioPinDirection(pin , GPIO_DIRECTION_IN);
-  printk(KERN_INFO "Device is now sending data to GPIO_04 PIN\n");
-}
+
 
 //A function that fills the data buffer
-void DHT11_driver_write_to_buffer() {
-    int i = 0;
+void DHT11_driver_write_to_buffer(char pin) {
+    int i = 0 , j = 0;
 
     for(i = 0; i < BUF_LEN; i++) {
-
-        //Activating the device
-        SendInitSequence(GPIO_04);
-
+        for(j = 0; j < 5; j++) {
         //Now device is sending data
         //TODO: Fill the data buffer acording to the specification
         // 0 - 54us PULL_DOWN & 24us PULL_UP
         // 1 - 54us PULL_DOWN & 70us PULL_UP
         // END - 54us PULL_DOWN & >70US PULL_UP
+        DHT11_data_buffer[i][j] = GetGpioPinValue(GPIO_04);
+        }
     }
 }
 
@@ -451,9 +456,6 @@ void DHT11_driver_write_to_buffer() {
 void DHT11_driver_write_buffer_to_file(struct file *filp, char *buf, size_t len, loff_t *f_pos) {
     int data_size = 0;
     int i = 0;
-
-    //Filling the data buffer here
-    DHT11_driver_write_to_buffer();
 
     if(*f_pos == 0) {
         //Getting size of valid data
