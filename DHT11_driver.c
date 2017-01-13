@@ -141,8 +141,8 @@ struct file_operations DHT11_driver_fops =
 //DHT11 driver function declarations
 int DHT11_driver_init(void);
 void DHT11_driver_exit(void);
-void DHT11_driver_write_to_buffer(struct RingBuffer *, size_t);
-void DHT11_driver_write_buffer_to_file(struct file* , struct RingBuffer *, size_t , loff_t *);
+void DHT11_driver_write_to_buffer(char *, size_t);
+void DHT11_driver_write_buffer_to_file(struct file* , char *, size_t , loff_t *);
 
 
 /* Declaration of the init and exit functions. */
@@ -154,6 +154,7 @@ int DHT11_device_major_number;
 
 //A data buffer
 char DHT11_data_buffer[BUF_LEN][5];
+int DHT11_sending_buffer[BUF_LEN];
 
 /* Blink timer vars. */
 static struct hrtimer blink_timer;
@@ -204,22 +205,31 @@ static enum hrtimer_restart blink_timer_callback(struct hrtimer *param)
 {
 #ifdef TEST
     static char power = 0x0;
-    static char gpio_12_val;
 
     power ^= 0x1;
 
     if (power)
-        SetGpioPin(GPIO_06);
+        SetGpioPin(GPIO_04);
     else
-        ClearGpioPin(GPIO_06);
-
-    gpio_12_val = GetGpioPinValue(GPIO_12);
-    printk(KERN_INFO "gpio_driver: gpio12 value: %d\n", gpio_12_val);
+        ClearGpioPin(GPIO_04);
 #endif
 
     hrtimer_forward(&blink_timer, ktime_get(), kt);
 
     return HRTIMER_RESTART;
+}
+
+static irqreturn_t h_irq_gpio3(int irq, void *data)
+{
+    static char value = -1;
+
+    printk("Interrupt from IRQ 0x%x\n", irq);
+
+    value = GetGpioPinValue(GPIO_12);
+
+    printk("GPIO_12 level = 0x%x\n", value);
+
+    return IRQ_HANDLED;
 }
 
 char GetGpioPinValue(char pin)
@@ -348,6 +358,7 @@ void SetGpioPinDirection(char pin, char direction)
     iowrite32(tmp, addr);
 }
 
+
 //Function to be called before writing data to the data buffer
 void SendInitSequence(char pin) {
   /* Send init sequence to GPIO_04 */
@@ -405,6 +416,15 @@ int DHT11_driver_init(void) {
     blink_timer.function = &blink_timer_callback;
     hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
 
+    /* Initialize gpio 3 ISR. */
+    gpio_request_one(GPIO_03, GPIOF_IN, "irq_gpio3");
+    irq_gpio3 = gpio_to_irq(GPIO_03);
+    if(request_irq(irq_gpio3, h_irq_gpio3,
+      IRQF_TRIGGER_FALLING, "irq_gpio3", (void *)(h_irq_gpio3))) != 0)
+    {
+        printk("Error: ISR not registered!\n");
+    } 
+
     //Initialize the device to send data
     SendInitSequence(GPIO_04);
     //Fill the data buffer here
@@ -433,20 +453,29 @@ void DHT11_driver_exit() {
   SetInternalPullUpDown(GPIO_04 , PULL_NONE);
 }
 
-
-
 //A function that fills the data buffer
 void DHT11_driver_write_to_buffer(char pin) {
     int i = 0 , j = 0;
+    char temp = NULL;
 
     for(i = 0; i < BUF_LEN; i++) {
         for(j = 0; j < 5; j++) {
-        //Now device is sending data
-        //TODO: Fill the data buffer acording to the specification
-        // 0 - 54us PULL_DOWN & 24us PULL_UP
-        // 1 - 54us PULL_DOWN & 70us PULL_UP
-        // END - 54us PULL_DOWN & >70US PULL_UP
-        DHT11_data_buffer[i][j] = GetGpioPinValue(GPIO_04);
+
+          //Now device is sending data
+          //TODO: Fill the data buffer acording to the specification
+          // 0 - 54us PULL_DOWN & 24us PULL_UP
+          // 1 - 54us PULL_DOWN & 70us PULL_UP
+          // END - 54us PULL_DOWN & >70US PULL_UP
+
+          //if(GetGpioPinValue(pin) == 0 && time <= 54us)
+          // reset temp
+          //if(GetGpioPinValue(pin) == 1 && time <= 24)
+          //  write 0 to register
+          //if(GetGpioPinValue(pin) == 1 && time <= 70)
+          //  write 1 to register
+          //if(GetGpioPinValue(pin) == 1 && time > 70)
+          //  ENDE
+          DHT11_data_buffer[i][j] = GetGpioPinValue(GPIO_04);
         }
     }
 }
@@ -457,17 +486,21 @@ void DHT11_driver_write_buffer_to_file(struct file *filp, char *buf, size_t len,
     int data_size = 0;
     int i = 0;
 
+    for(i = 0; i < BUF_LEN; i++) {
+      DHT11_sending_buffer[i] = DHT11_data_buffer[i][0] & DHT11_data_buffer[i][1]
+                  & DHT11_data_buffer[i][2] & DHT11_data_buffer[i][3];
+    }
+
     if(*f_pos == 0) {
         //Getting size of valid data
-        data_size = strlen(DHT11_data_buffer);
+        data_size = strlen(DHT11_sending_buffer);
 
         //Send data to user space
-        if (copy_to_user(buf, DHT11_data_buffer, data_size) != 0)  {
+        if (copy_to_user(buf, DHT11_sending_buffer, data_size) != 0)  {
             return -EFAULT;
         }
         else
         {
-            ClearDataBuffer();
             (*f_pos) += data_size;
             return data_size;
         }
