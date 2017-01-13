@@ -152,8 +152,12 @@ module_exit(DHT11_driver_exit);
 //Driver major number
 int DHT11_device_major_number;
 
+struct data_format {
+  char data[5];
+};
+
 //A data buffer
-char DHT11_data_buffer[BUF_LEN][5];
+struct data_format DHT11_data_buffer[BUF_LEN];
 int DHT11_sending_buffer[BUF_LEN];
 
 /* Blink timer vars. */
@@ -163,6 +167,8 @@ static ktime_t kt;
 #define MS_TO_NS(x) ((x) * 1E6L)
 #define TIMER_SEC    0
 #define TIMER_NANO_SEC  250*1000*1000 /* 250ms */
+
+
 
 char GetGPIOPinOffset(char pin)
 {
@@ -423,7 +429,7 @@ int DHT11_driver_init(void) {
       IRQF_TRIGGER_FALLING, "irq_gpio3", (void *)(h_irq_gpio3))) != 0)
     {
         printk("Error: ISR not registered!\n");
-    } 
+    }
 
     //Initialize the device to send data
     SendInitSequence(GPIO_04);
@@ -459,7 +465,7 @@ void DHT11_driver_write_to_buffer(char pin) {
     char temp = NULL;
 
     for(i = 0; i < BUF_LEN; i++) {
-        for(j = 0; j < 5; j++) {
+        //for(j = 0; j < 5; j++) {
 
           //Now device is sending data
           //TODO: Fill the data buffer acording to the specification
@@ -468,7 +474,7 @@ void DHT11_driver_write_to_buffer(char pin) {
           // END - 54us PULL_DOWN & >70US PULL_UP
 
           //if(GetGpioPinValue(pin) == 0 && time <= 54us)
-          // reset temp
+          // shit temp
           //if(GetGpioPinValue(pin) == 1 && time <= 24)
           //  write 0 to register
           //if(GetGpioPinValue(pin) == 1 && time <= 70)
@@ -476,19 +482,18 @@ void DHT11_driver_write_to_buffer(char pin) {
           //if(GetGpioPinValue(pin) == 1 && time > 70)
           //  ENDE
           DHT11_data_buffer[i][j] = GetGpioPinValue(GPIO_04);
-        }
+        //}
     }
 }
 
 //Fucntion that send buffer data to user space using function copy_to_user
-//Asuming the driver is allready filled
 void DHT11_driver_write_buffer_to_file(struct file *filp, char *buf, size_t len, loff_t *f_pos) {
     int data_size = 0;
     int i = 0;
 
     for(i = 0; i < BUF_LEN; i++) {
-      DHT11_sending_buffer[i] = DHT11_data_buffer[i][0] & DHT11_data_buffer[i][1]
-                  & DHT11_data_buffer[i][2] & DHT11_data_buffer[i][3];
+      DHT11_sending_buffer[i] = DHT11_data_buffer[i].data[0] & DHT11_data_buffer[i].data[1]
+                  & DHT11_data_buffer[i].data[2] & DHT11_data_buffer[i].data[3];
     }
 
     if(*f_pos == 0) {
