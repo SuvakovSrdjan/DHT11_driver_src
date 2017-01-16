@@ -1,22 +1,38 @@
-//DHT11 driver
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/slab.h>
-#include <linux/fs.h>
+// DHT11 driver
+// http://www.uugear.com/portfolio/dht11-humidity-temperature-sensor-module/
+// --sajt za dht11
+/*#include <asm/uaccess.h>
 #include <linux/errno.h>
-#include <linux/types.h>
 #include <linux/fcntl.h>
-#include <linux/proc_fs.h>
-#include <linux/string.h>
-#include <linux/ioport.h>
-#include <linux/ktime.h>
+#include <linux/fs.h>
 #include <linux/hrtimer.h>
+#include <linux/init.h>
+#include <linux/ioport.h>
+#include <linux/kernel.h>
+#include <linux/ktime.h>
+#include <linux/module.h>
+#include <linux/proc_fs.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/types.h>
+*/
 #include <asm/io.h>
 #include <asm/uaccess.h>
-
-
-
+#include <linux/errno.h>
+#include <linux/fcntl.h>
+#include <linux/fs.h>
+#include <linux/gpio.h>
+#include <linux/hrtimer.h>
+#include <linux/init.h>
+#include <linux/interrupt.h>
+#include <linux/ioport.h>
+#include <linux/kernel.h>
+#include <linux/ktime.h>
+#include <linux/module.h>
+#include <linux/proc_fs.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/types.h>
 MODULE_LICENSE("Dual BSD/GPL");
 
 #define BUF_LEN 80
@@ -25,81 +41,81 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define GPIO_BASE_ADDR (0x3F200000)
 //--
 
-//000 = GPIO Pin 'x' is an input
-//001 = GPIO Pin 'x' is an output
+// 000 = GPIO Pin 'x' is an input
+// 001 = GPIO Pin 'x' is an output
 // By default GPIO pin is being used as an input
-#define GPIO_DIRECTION_IN  (0)
+#define GPIO_DIRECTION_IN (0)
 #define GPIO_DIRECTION_OUT (1)
 //--
 
-//Handle GPIO: 0-9
+// Handle GPIO: 0-9
 /* GPIO Function Select 0. */
 #define GPFSEL0_BASE_ADDR (GPIO_BASE_ADDR + 0x00000000)
 
-//Handle GPIO: 10-19
+// Handle GPIO: 10-19
 /* GPIO Function Select 1. */
 #define GPFSEL1_BASE_ADDR (GPIO_BASE_ADDR + 0x00000004)
 
-//Handle GPIO: 20-29
+// Handle GPIO: 20-29
 /* GPIO Function Select 2. */
 #define GPFSEL2_BASE_ADDR (GPIO_BASE_ADDR + 0x00000008)
 
-//Handle GPIO: 30-39
+// Handle GPIO: 30-39
 /* GPIO Function Select 3. */
 #define GPFSEL3_BASE_ADDR (GPIO_BASE_ADDR + 0x0000000C)
 
-//Handle GPIO: 40-49
+// Handle GPIO: 40-49
 /* GPIO Function Select 4. */
 #define GPFSEL4_BASE_ADDR (GPIO_BASE_ADDR + 0x00000010)
 
-//Handle GPIO: 50-53
+// Handle GPIO: 50-53
 /* GPIO Function Select 5. */
 #define GPFSEL5_BASE_ADDR (GPIO_BASE_ADDR + 0x00000014)
 //--
 
-//GPIO: 0-31
+// GPIO: 0-31
 /* GPIO Pin Output Set 0. */
 #define GPSET0_BASE_ADDR (GPIO_BASE_ADDR + 0x0000001C)
 
-//GPIO: 32-53
+// GPIO: 32-53
 /* GPIO Pin Output Set 1. */
 #define GPSET1_BASE_ADDR (GPIO_BASE_ADDR + 0x00000020)
 
 //--
-//GPIO: 0-31
+// GPIO: 0-31
 /* GPIO Pin Output Clear 0. */
 #define GPCLR0_BASE_ADDR (GPIO_BASE_ADDR + 0x00000028)
 
-//GPIO: 32-53
+// GPIO: 32-53
 /* GPIO Pin Output Clear 1. */
 #define GPCLR1_BASE_ADDR (GPIO_BASE_ADDR + 0x0000002C)
 
 //--
-//GPIO: 0-31
+// GPIO: 0-31
 /* GPIO Pin Level 0. */
 #define GPLEV0_BASE_ADDR (GPIO_BASE_ADDR + 0x00000034)
 
-//GPIO: 32-53
+// GPIO: 32-53
 /* GPIO Pin Level 1. */
 #define GPLEV1_BASE_ADDR (GPIO_BASE_ADDR + 0x00000038)
 //--
 
-//GPIO: 0-53
+// GPIO: 0-53
 /* GPIO Pin Pull-up/down Enable. */
 #define GPPUD_BASE_ADDR (GPIO_BASE_ADDR + 0x00000094)
 
-//GPIO: 0-31
+// GPIO: 0-31
 /* GPIO Pull-up/down Clock Register 0. */
 #define GPPUDCLK0_BASE_ADDR (GPIO_BASE_ADDR + 0x00000098)
 
-//GPIO: 32-53
+// GPIO: 32-53
 /* GPIO Pull-up/down Clock Register 1. */
 #define GPPUDCLK1_BASE_ADDR (GPIO_BASE_ADDR + 0x0000009C)
 
 /* PUD - GPIO Pin Pull-up/down */
 #define PULL_NONE (0)
 #define PULL_DOWN (1)
-#define PULL_UP   (2)
+#define PULL_UP (2)
 
 /* Avilable GPIO pins. */
 #define GPIO_02 (2)
@@ -129,387 +145,359 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define GPIO_26 (26)
 #define GPIO_27 (27)
 
-/* Structure that declares the usual file access functions. */
-struct file_operations DHT11_driver_fops =
-{
-    open    :   gpio_driver_open,
-    release :   gpio_driver_release,
-    read    :   gpio_driver_read,
-    write   :   gpio_driver_write
+struct data_format {
+  char data[5];
 };
+// A data buffer
+struct data_format DHT11_data_buffer[BUF_LEN];
+int DHT11_sending_buffer[BUF_LEN];
 
-//DHT11 driver function declarations
+// DHT11 driver function declarations
 int DHT11_driver_init(void);
 void DHT11_driver_exit(void);
-void DHT11_driver_write_to_buffer(char *, size_t);
-void DHT11_driver_write_buffer_to_file(struct file* , char *, size_t , loff_t *);
+static int DHT11_driver_open(struct inode *, struct file *);
+static int DHT11_driver_release(struct inode *, struct file *);
+void DHT11_driver_write_to_buffer(char pin);
+static ssize_t DHT11_driver_write_buffer_to_file(struct file *, const char *buf,
+                                                 size_t, loff_t *);
 
+struct file_operations DHT11_driver_fops = {
+  open : DHT11_driver_open,
+  release : DHT11_driver_release,
+  // read : DHT11_driver_read,
+  write : DHT11_driver_write_buffer_to_file
+};
 
 /* Declaration of the init and exit functions. */
 module_init(DHT11_driver_init);
 module_exit(DHT11_driver_exit);
 
-//Driver major number
+// Driver major number
 int DHT11_device_major_number;
-
-struct data_format {
-  char data[5];
-};
-
-//A data buffer
-struct data_format DHT11_data_buffer[BUF_LEN];
-int DHT11_sending_buffer[BUF_LEN];
 
 /* Blink timer vars. */
 static struct hrtimer blink_timer;
 static ktime_t kt;
 
-#define MS_TO_NS(x) ((x) * 1E6L)
-#define TIMER_SEC    0
-#define TIMER_NANO_SEC  250*1000*1000 /* 250ms */
+#define MS_TO_NS(x) ((x)*1E6L)
+#define TIMER_SEC 0
+#define TIMER_40_us_SEC 50 * 1000        /* 40 uS delay za DHT11 */
+#define TIMER_70_us_SEC 80 * 1000        /* 70 uS */
+#define TIMER_18_us_SEC 25 * 1000        /* 18 uS */
+#define TIMER_24_us_SEC 30 * 1000        /* 24 uS */
+#define TIMER_54_us_SEC 60 * 1000        /* 54 uS */
+#define TIMER_18_ms_SEC 20 * 1000 * 1000 /* 18 mS */
 
+unsigned int GetGPFSELReg(char pin) {
+  unsigned int addr;
 
+  if (pin >= 0 && pin < 10)
+    addr = GPFSEL0_BASE_ADDR;
+  else if (pin >= 10 && pin < 20)
+    addr = GPFSEL1_BASE_ADDR;
+  else if (pin >= 20 && pin < 30)
+    addr = GPFSEL2_BASE_ADDR;
+  else if (pin >= 30 && pin < 40)
+    addr = GPFSEL3_BASE_ADDR;
+  else if (pin >= 40 && pin < 50)
+    addr = GPFSEL4_BASE_ADDR;
+  else /*if(pin >= 50 && pin <53) */
+    addr = GPFSEL5_BASE_ADDR;
 
-char GetGPIOPinOffset(char pin)
-{
-    if(pin >= 0 && pin <10)
-        pin = pin;
-    else if(pin >= 10 && pin <20)
-        pin -= 10;
-    else if(pin >= 20 && pin <30)
-        pin -= 20;
-    else if(pin >= 30 && pin <40)
-        pin -= 30;
-    else if(pin >= 40 && pin <50)
-        pin -= 40;
-    else /*if(pin >= 50 && pin <53) */
-        pin -= 50;
-
-    return pin;
+  return addr;
 }
 
-char GetGPIOPinOffset(char pin)
-{
-    if(pin >= 0 && pin <10)
-        pin = pin;
-    else if(pin >= 10 && pin <20)
-        pin -= 10;
-    else if(pin >= 20 && pin <30)
-        pin -= 20;
-    else if(pin >= 30 && pin <40)
-        pin -= 30;
-    else if(pin >= 40 && pin <50)
-        pin -= 40;
-    else /*if(pin >= 50 && pin <53) */
-        pin -= 50;
+char GetGPIOPinOffset(char pin) {
+  if (pin >= 0 && pin < 10)
+    pin = pin;
+  else if (pin >= 10 && pin < 20)
+    pin -= 10;
+  else if (pin >= 20 && pin < 30)
+    pin -= 20;
+  else if (pin >= 30 && pin < 40)
+    pin -= 30;
+  else if (pin >= 40 && pin < 50)
+    pin -= 40;
+  else /*if(pin >= 50 && pin <53) */
+    pin -= 50;
 
-    return pin;
+  return pin;
 }
 
-//TODO: Modify the function for it to work on GPIO_04
-static enum hrtimer_restart blink_timer_callback(struct hrtimer *param)
-{
-#ifdef TEST
-    static char power = 0x0;
-
-    power ^= 0x1;
-
-    if (power)
-        SetGpioPin(GPIO_04);
-    else
-        ClearGpioPin(GPIO_04);
-#endif
-
-    hrtimer_forward(&blink_timer, ktime_get(), kt);
-
-    return HRTIMER_RESTART;
+static enum hrtimer_restart blink_timer_callback(struct hrtimer *param) {
+  return HRTIMER_NORESTART;
 }
 
-static irqreturn_t h_irq_gpio3(int irq, void *data)
-{
-    static char value = -1;
-
-    printk("Interrupt from IRQ 0x%x\n", irq);
-
-    value = GetGpioPinValue(GPIO_12);
-
-    printk("GPIO_12 level = 0x%x\n", value);
-
-    return IRQ_HANDLED;
+void timer_delay(int time_to_wait) {
+  hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+  kt = ktime_set(TIMER_SEC, time_to_wait);
+  blink_timer.function = &blink_timer_callback;
+  hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
 }
 
-char GetGpioPinValue(char pin)
-{
-    void *addr = NULL;
-    unsigned int tmp;
-    unsigned int mask;
+char GetGpioPinValue(char pin) {
+  void *addr = NULL;
+  unsigned int tmp;
+  unsigned int mask;
 
-    /* Get base address of gpio level register. */
-    addr = (pin < 32) ? (void *) GPLEV0_BASE_ADDR : (void *)GPLEV1_BASE_ADDR;
-    pin = (pin < 32) ? pin : pin - 32;
+  /* Get base address of gpio level register. */
+  addr = (pin < 32) ? (void *)GPLEV0_BASE_ADDR : (void *)GPLEV1_BASE_ADDR;
+  pin = (pin < 32) ? pin : pin - 32;
 
-    /* Read gpio pin level. */
-    addr = ioremap((unsigned long)addr, 4);
-    tmp = ioread32(addr);
-    mask = 0x1 << pin;
-    tmp &= mask;
+  /* Read gpio pin level. */
+  addr = ioremap((unsigned long)addr, 4);
+  tmp = ioread32(addr);
+  mask = 0x1 << pin;
+  tmp &= mask;
 
-    return (tmp >> pin);
-
-
-void ClearGpioPin(char pin)
-{
-    void *addr = NULL;
-    unsigned int tmp;
-
-    /* Get base address of gpio clear register. */
-    addr = (pin < 32) ? (void *)GPCLR0_BASE_ADDR : (void *)GPCLR1_BASE_ADDR;
-    pin = (pin < 32) ? pin : pin - 32;
-
-    /* Clear gpio. */
-    addr = ioremap((unsigned long)addr, 4);
-    tmp = 0x1 << pin;
-    iowrite32(tmp, addr);
+  return (tmp >> pin);
 }
 
+void ClearGpioPin(char pin) {
+  void *addr = NULL;
+  unsigned int tmp;
 
-void SetGpioPin(char pin)
-{
-    void *addr = NULL;
-    unsigned int tmp;
+  /* Get base address of gpio clear register. */
+  addr = (pin < 32) ? (void *)GPCLR0_BASE_ADDR : (void *)GPCLR1_BASE_ADDR;
+  pin = (pin < 32) ? pin : pin - 32;
 
-    /* Get base address of gpio set register. */
-    addr = (pin < 32) ? (void *) GPSET0_BASE_ADDR : (void *)GPSET1_BASE_ADDR;
-    pin = (pin < 32) ? pin : pin - 32;
-
-    /* Set gpio. */
-    addr = ioremap((unsigned long)addr, 4);
-    tmp = 0x1 << pin;
-    iowrite32(tmp, addr);
+  /* Clear gpio. */
+  addr = ioremap((unsigned long)addr, 4);
+  tmp = 0x1 << pin;
+  iowrite32(tmp, addr);
 }
 
-void SetInternalPullUpDown(char pin, char value)
-{
-    unsigned int base_addr_gppud;
-    unsigned int base_addr_gppudclk;
-    void *addr = NULL;
-    unsigned int tmp;
-    unsigned int mask;
+void SetGpioPin(char pin) {
+  void *addr = NULL;
+  unsigned int tmp;
 
-    /* Get base address of GPIO Pull-up/down Register (GPPUD). */
-    base_addr_gppud = GPPUD_BASE_ADDR;
+  /* Get base address of gpio set register. */
+  addr = (pin < 32) ? (void *)GPSET0_BASE_ADDR : (void *)GPSET1_BASE_ADDR;
+  pin = (pin < 32) ? pin : pin - 32;
 
-    /* Get base address of GPIO Pull-up/down Clock Register (GPPUDCLK). */
-    base_addr_gppudclk = (pin < 32) ? GPPUDCLK0_BASE_ADDR : GPPUDCLK1_BASE_ADDR;
+  /* Set gpio. */
+  addr = ioremap((unsigned long)addr, 4);
+  tmp = 0x1 << pin;
+  iowrite32(tmp, addr);
+}
 
-    /* Get pin offset in register . */
-    pin = (pin < 32) ? pin : pin - 32;
+void SetInternalPullUpDown(char pin, char value) {
+  unsigned int base_addr_gppud;
+  unsigned int base_addr_gppudclk;
+  void *addr = NULL;
+  unsigned int tmp;
+  unsigned int mask;
 
-    /* Write to GPPUD to set the required control signal (i.e. Pull-up or Pull-Down or neither
-       to remove the current Pull-up/down). */
-    addr = ioremap(base_addr_gppud, 4);
-    iowrite32(value, addr);
+  /* Get base address of GPIO Pull-up/down Register (GPPUD). */
+  base_addr_gppud = GPPUD_BASE_ADDR;
 
-    /* Wait 150 cycles  this provides the required set-up time for the control signal */
+  /* Get base address of GPIO Pull-up/down Clock Register (GPPUDCLK). */
+  base_addr_gppudclk = (pin < 32) ? GPPUDCLK0_BASE_ADDR : GPPUDCLK1_BASE_ADDR;
 
-    /* Write to GPPUDCLK0/1 to clock the control signal into the GPIO pads you wish to
-       modify  NOTE only the pads which receive a clock will be modified, all others will
-       retain their previous state. */
-    addr = ioremap(base_addr_gppudclk, 4);
-    tmp = ioread32(addr);
-    mask = 0x1 << pin;
+  /* Get pin offset in register . */
+  pin = (pin < 32) ? pin : pin - 32;
+
+  /* Write to GPPUD to set the required control signal (i.e. Pull-up or
+     Pull-Down or neither
+     to remove the current Pull-up/down). */
+  addr = ioremap(base_addr_gppud, 4);
+  iowrite32(value, addr);
+
+  /* Wait 150 cycles  this provides the required set-up time for the control
+   * signal */
+
+  /* Write to GPPUDCLK0/1 to clock the control signal into the GPIO pads you
+     wish to
+     modify  NOTE only the pads which receive a clock will be modified, all
+     others will
+     retain their previous state. */
+  addr = ioremap(base_addr_gppudclk, 4);
+  tmp = ioread32(addr);
+  mask = 0x1 << pin;
+  tmp |= mask;
+  iowrite32(tmp, addr);
+
+  /* Wait 150 cycles  this provides the required hold time for the control
+   * signal */
+
+  /* Write to GPPUD to remove the control signal. */
+  addr = ioremap(base_addr_gppud, 4);
+  iowrite32(PULL_NONE, addr);
+
+  /* Write to GPPUDCLK0/1 to remove the clock. */
+  addr = ioremap(base_addr_gppudclk, 4);
+  tmp = ioread32(addr);
+  mask = 0x1 << pin;
+  tmp &= (~mask);
+  iowrite32(tmp, addr);
+}
+
+void SetGpioPinDirection(char pin, char direction) {
+  unsigned int base_addr;
+  void *addr = NULL;
+  unsigned int tmp;
+  unsigned int mask;
+
+  /* Get base address of function selection register. */
+  base_addr = GetGPFSELReg(pin);
+
+  /* Calculate gpio pin offset. */
+  pin = GetGPIOPinOffset(pin);
+
+  /* Set gpio pin direction. */
+  addr = ioremap(base_addr, 4);
+  tmp = ioread32(addr);
+  if (direction) { // set as output: set 1
+    mask = 0x1 << (pin * 3);
     tmp |= mask;
-    iowrite32(tmp, addr);
-
-    /* Wait 150 cycles  this provides the required hold time for the control signal */
-
-    /* Write to GPPUD to remove the control signal. */
-    addr = ioremap(base_addr_gppud, 4);
-    iowrite32(PULL_NONE, addr);
-
-    /* Write to GPPUDCLK0/1 to remove the clock. */
-    addr = ioremap(base_addr_gppudclk, 4);
-    tmp = ioread32(addr);
-    mask = 0x1 << pin;
-    tmp &= (~mask);
-    iowrite32(tmp, addr);
+  } else { // set as input: set 0
+    mask = ~(0x1 << (pin * 3));
+    tmp &= mask;
+  }
+  iowrite32(tmp, addr);
 }
 
-void SetGpioPinDirection(char pin, char direction)
-{
-    unsigned int base_addr;
-    void *addr = NULL;
-    unsigned int tmp;
-    unsigned int mask;
-
-    /* Get base address of function selection register. */
-    base_addr = GetGPFSELReg(pin);
-
-    /* Calculate gpio pin offset. */
-    pin = GetGPIOPinOffset(pin);
-
-    /* Set gpio pin direction. */
-    addr = ioremap(base_addr, 4);
-    tmp = ioread32(addr);
-    if(direction)
-    { //set as output: set 1
-      mask = 0x1 << (pin*3);
-      tmp |= mask;
-    }
-    else
-    { //set as input: set 0
-      mask = ~(0x1 << (pin*3));
-      tmp &= mask;
-    }
-    iowrite32(tmp, addr);
-}
-
-
-//Function to be called before writing data to the data buffer
+// Function to be called before writing data to the data buffer
 void SendInitSequence(char pin) {
   /* Send init sequence to GPIO_04 */
-  //Init GPIO_04
-  //Set GPIO_04 direction to out to send init sequence
-  SetGpioPinDirection(pin , GPIO_DIRECTION_OUT);
-  //Send init sequence
-  //TODO: for 18us ClearGpioPinDirecton(GPIO_04 , PULL_DOWN); for 40us SetGpioPinDirection(GPIO_04 , PULL_UP);
-  //After init sequence the device is now sending data to GPIO_04
-  //Set GPIO_04 directon ti GPIO_DIRECTION_IN
-  SetGpioPinDirection(pin , GPIO_DIRECTION_IN);
+  // Init GPIO_04
+  // Set GPIO_04 direction to out to send init sequence
+  SetGpioPinDirection(pin, GPIO_DIRECTION_OUT);
+  ClearGpioPin(pin);
+  timer_delay(TIMER_18_ms_SEC);
+  SetGpioPin(pin);
+  timer_delay(TIMER_40_us_SEC);
+  SetGpioPinDirection(pin, GPIO_DIRECTION_IN);
   printk(KERN_INFO "Device is now sending data to GPIO_04 PIN\n");
 }
 
-void ClearDataBuffer() {
-    int i = 0 , j = 0;
+void ClearDataBuffer(void) {
+  int i = 0, j = 0;
 
-    for(i = 0; i < BUF_LEN; i++) {
-        for(j = 0; j < 5; j++) {
-            DHT11_data_buffer[i][j] = 0;
-        }
+  for (i = 0; i < BUF_LEN; i++) {
+    for (j = 0; j < 5; j++) {
+      DHT11_data_buffer[i].data[j] = 0;
     }
+  }
 }
 
-//Functon operations:
+// Functon operations:
 // - Clear data buffer
 // - Init timer
 // - Init GPIO Pins
 int DHT11_driver_init(void) {
-    int result = -1;
+  int result = -1;
 
-    //Registering the device
-    result = register_chardev(0 , "DHT11_driver" , &DHT11_driver_fops);
-    if(result < 0) {
-        printk(KERN_INFO "DHT11_driver: cannot obtain device major number %d\n" , DHT11_device_major_number);
-        return result;
-    }
-    DHT11_device_major_number = result;
-    printk(KERN_INFO "Successfuly obtained device major number\n");
+  // Registering the device
+  result = register_chrdev(0, "DHT11_driver", &DHT11_driver_fops);
+  if (result < 0) {
+    printk(KERN_INFO "DHT11_driver: cannot obtain device major number %d\n",
+           DHT11_device_major_number);
+    return result;
+  }
+  DHT11_device_major_number = result;
+  printk(KERN_INFO "Successfuly obtained device major number\n");
 
-    //Init data buffer
-    //TODO: Check if you didnt fuck up
-    DHT11_data_buffer = kmallock(BUF_LEN , GFP_KERNEL);
-    if(!DHT11_data_buffer) {
-      result = -ENOMEM:
+  // Init data buffer
+  // TODO: Check if you didnt fuck up
+  /*  DHT11_data_buffer = kmalloc(BUF_LEN, GFP_KERNEL);
+    if (!DHT11_data_buffer) {
+      result = -ENOMEM;
       goto fail;
     }
+  */
+  memset(DHT11_data_buffer, 0, BUF_LEN);
+  printk(KERN_INFO "Successfuly allocated memory for ring buffer\n");
 
-    memset(DHT11_data_buffer , 0 , BUF_LEN);
-    printk(KERN_INFO "Successfuly allocated memory for ring buffer\n");
-
-    /* Initialize high resolution timer. */
+  /*  Initialize high resolution timer.
     hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     kt = ktime_set(TIMER_SEC, TIMER_NANO_SEC);
     blink_timer.function = &blink_timer_callback;
     hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
+  */
+  // Initialize the device to send data
+  SendInitSequence(GPIO_04);
+  // Fill the data buffer here
+  // TODO: odraditi u funkciji DHT11_driver_write_to_buffer(...);
 
-    /* Initialize gpio 3 ISR. */
-    gpio_request_one(GPIO_03, GPIOF_IN, "irq_gpio3");
-    irq_gpio3 = gpio_to_irq(GPIO_03);
-    if(request_irq(irq_gpio3, h_irq_gpio3,
-      IRQF_TRIGGER_FALLING, "irq_gpio3", (void *)(h_irq_gpio3))) != 0)
-    {
-        printk("Error: ISR not registered!\n");
-    }
-
-    //Initialize the device to send data
-    SendInitSequence(GPIO_04);
-    //Fill the data buffer here
-    DHT11_driver_write_to_buffer(GPIO_4);
-
-    return 0;
-fail:
-    DHT11_driver_exit();
-    return result;
+  return 0;
 }
 
-//Cleanup:
+// Cleanup:
 // - Free memory from the buffer
 // - Reset timer
 // - Clear GPIO pin
 void DHT11_driver_exit() {
-  //Freeing the major number
-  unregister_chardev(DHT11_device_major_number , "DHT11_driver");
+  // Freeing the major number
+  unregister_chrdev(DHT11_device_major_number, "DHT11_driver");
 
   printk(KERN_INFO "Removig DHT11_driver module\n");
 
-  //Release high resolution timer
+  // Release high resolution timer
   hrtimer_cancel(&blink_timer);
 
-  //Clear GPIO pins
-  SetInternalPullUpDown(GPIO_04 , PULL_NONE);
+  // Clear GPIO pins
+  SetInternalPullUpDown(GPIO_04, PULL_NONE);
 }
 
-//A function that fills the data buffer
+// A function that fills the data buffer
 void DHT11_driver_write_to_buffer(char pin) {
-    int i = 0 , j = 0;
-    char temp = NULL;
+  int i = 0;
 
-    for(i = 0; i < BUF_LEN; i++) {
-        //for(j = 0; j < 5; j++) {
-
-          //Now device is sending data
-          //TODO: Fill the data buffer acording to the specification
-          // 0 - 54us PULL_DOWN & 24us PULL_UP
-          // 1 - 54us PULL_DOWN & 70us PULL_UP
-          // END - 54us PULL_DOWN & >70US PULL_UP
-
-          //if(GetGpioPinValue(pin) == 0 && time <= 54us)
-          // shit temp
-          //if(GetGpioPinValue(pin) == 1 && time <= 24)
-          //  write 0 to register
-          //if(GetGpioPinValue(pin) == 1 && time <= 70)
-          //  write 1 to register
-          //if(GetGpioPinValue(pin) == 1 && time > 70)
-          //  ENDE
-          DHT11_data_buffer[i][j] = GetGpioPinValue(GPIO_04);
-        //}
+  for (i = 0; i < BUF_LEN; i++) {
+    // Now device is sending data
+    // TODO: Fill the data buffer acording to the specification
+    while (GetGpioPinValue(GPIO_04) == 0) {
+      // tmp << 1;
     }
+    // 0 - 54us PULL_DOWN & 24us PULL_UP
+    // 1 - 54us PULL_DOWN & 70us PULL_UP
+    // END - 54us PULL_DOWN & >70US PULL_UP
+  }
 }
 
-//Fucntion that send buffer data to user space using function copy_to_user
-void DHT11_driver_write_buffer_to_file(struct file *filp, char *buf, size_t len, loff_t *f_pos) {
-    int data_size = 0;
-    int i = 0;
+/* File open function. */
+static int DHT11_driver_open(struct inode *inode, struct file *filp) {
+  /* Initialize driver variables here. */
 
-    for(i = 0; i < BUF_LEN; i++) {
-      DHT11_sending_buffer[i] = DHT11_data_buffer[i].data[0] & DHT11_data_buffer[i].data[1]
-                  & DHT11_data_buffer[i].data[2] & DHT11_data_buffer[i].data[3];
-    }
+  /* Reset the device here. */
 
-    if(*f_pos == 0) {
-        //Getting size of valid data
-        data_size = strlen(DHT11_sending_buffer);
+  /* Success. */
+  return 0;
+}
 
-        //Send data to user space
-        if (copy_to_user(buf, DHT11_sending_buffer, data_size) != 0)  {
-            return -EFAULT;
-        }
-        else
-        {
-            (*f_pos) += data_size;
-            return data_size;
-        }
+/* File close function. */
+static int DHT11_driver_release(struct inode *inode, struct file *filp) {
+  /* Success. */
+  return 0;
+}
+
+// Fucntion that send buffer data to user space using function copy_to_user
+// Asuming the driver is allready filled
+static ssize_t DHT11_driver_write_buffer_to_file(struct file *filp,
+                                                 const char *buf, size_t len,
+                                                 loff_t *f_pos) {
+  int data_size = BUF_LEN;
+  int i = 0;
+  for (i = 0; i < BUF_LEN; i++) {
+    DHT11_sending_buffer[i] =
+        DHT11_data_buffer[i].data[0] & DHT11_data_buffer[i].data[1] &
+        DHT11_data_buffer[i].data[2] & DHT11_data_buffer[i].data[3];
+  }
+
+  if (*f_pos == 0) {
+    // Getting size of valid data
+    // data_size = strlen(DHT11_data_buffer);
+
+    // Send data to user space
+    if (copy_to_user(DHT11_sending_buffer, buf, data_size) != 0) {
+      return -EFAULT;
     } else {
-        return 0;
+      ClearDataBuffer();
+      (*f_pos) += data_size;
+      return data_size;
     }
+  } else {
+    return 0;
+  }
 }
