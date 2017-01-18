@@ -151,6 +151,7 @@ struct data_format {
 // A data buffer
 struct data_format DHT11_data_buffer[BUF_LEN];
 int DHT11_sending_buffer[BUF_LEN];
+int dht11_dat[5] = { 0, 0, 0, 0, 0 };
 
 // DHT11 driver function declarations
 int DHT11_driver_init(void);
@@ -187,6 +188,7 @@ static ktime_t kt;
 #define TIMER_24_us_SEC 30 * 1000        /* 24 uS */
 #define TIMER_54_us_SEC 60 * 1000        /* 54 uS */
 #define TIMER_18_ms_SEC 20 * 1000 * 1000 /* 18 mS */
+#define TIMER_1_us_SEC 1 * 1000 	     // 1 uS
 
 unsigned int GetGPFSELReg(char pin) {
   unsigned int addr;
@@ -359,16 +361,56 @@ void SetGpioPinDirection(char pin, char direction) {
 
 // Function to be called before writing data to the data buffer
 void SendInitSequence(char pin) {
+  uint8_t i , j = 0;
+  uint8_t laststate = PULL_UP;
+  uint8_t counter = 0;
+
+  dht11_dat[0] = dht11_dat[1] = dht11_dat[2] = dht11_dat[3] = dht11_dat[4] = 0;
+
   /* Send init sequence to GPIO_04 */
   // Init GPIO_04
   // Set GPIO_04 direction to out to send init sequence
   SetGpioPinDirection(pin, GPIO_DIRECTION_OUT);
-  ClearGpioPin(pin);
+  //ClearGpioPin(pin);
+  SetInternalPullUpDown(pin , PULL_DOWN);
   timer_delay(TIMER_18_ms_SEC);
-  SetGpioPin(pin);
+  SetInternalPullUpDown(pin , PULL_UP);
   timer_delay(TIMER_40_us_SEC);
   SetGpioPinDirection(pin, GPIO_DIRECTION_IN);
   printk(KERN_INFO "Device is now sending data to GPIO_04 PIN\n");
+
+  //Detect change and read data
+  for(i = 0; i < 85; i++) {
+      counter = 0;
+      printk(KERN_INFO "Current state of GPIO_4: %c" , GetGpioPinValue(pin));
+      while(GetGpioPinValue(pin) == laststate) {
+          counter++;
+          timer_delay(TIMER_1_us_SEC);
+          if(counter == 225) {
+              break;
+          }
+      }
+      laststate = GetGpioPinValue(pin);
+
+      if(counter == 225)
+        break;
+
+      //Ignore the first 3 transitions
+      if( (i >= 4) && (i % 2 == 0)) {
+        dht11_dat[j/8] <<= 1;
+        if(counter > 16)
+            dht11_dat[j/8] |= 1;
+        j++;
+      }
+  }
+
+  if ( (j >= 40) &&
+       (dht11_dat[4] == ( (dht11_dat[0] + dht11_dat[1] + dht11_dat[2] + dht11_dat[3]) & 0xFF) ) )
+  {
+      printk(KERN_INFO "Humidity = %d.%d Temperature = %d.%d *C\n", dht11_dat[0], dht11_dat[1], dht11_dat[2], dht11_dat[3] );
+  } else  {
+      printk(KERN_INFO "Data not good, skip\n" );
+  }
 }
 
 void ClearDataBuffer(void) {
@@ -387,6 +429,7 @@ void ClearDataBuffer(void) {
 // - Init GPIO Pins
 int DHT11_driver_init(void) {
   int result = -1;
+  //int i = 0;
 
   // Registering the device
   result = register_chrdev(0, "DHT11_driver", &DHT11_driver_fops);
@@ -409,14 +452,18 @@ int DHT11_driver_init(void) {
   memset(DHT11_data_buffer, 0, BUF_LEN);
   printk(KERN_INFO "Successfuly allocated memory for ring buffer\n");
 
-  /*  Initialize high resolution timer.
-    hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-    kt = ktime_set(TIMER_SEC, TIMER_NANO_SEC);
-    blink_timer.function = &blink_timer_callback;
-    hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
-  */
+  // Initialize high resolution timer.
+  hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+  kt = ktime_set(TIMER_SEC, TIMER_40_us_SEC);
+  blink_timer.function = &blink_timer_callback;
+  hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
+
+  //printk(KERN_INFO "So far , so good\n");
+
   // Initialize the device to send data
+  //for(i = 0; i < 85; i++) {
   SendInitSequence(GPIO_04);
+  //}
   // Fill the data buffer here
   // TODO: odraditi u funkciji DHT11_driver_write_to_buffer(...);
 
@@ -437,11 +484,12 @@ void DHT11_driver_exit() {
   hrtimer_cancel(&blink_timer);
 
   // Clear GPIO pins
-  SetInternalPullUpDown(GPIO_04, PULL_NONE);
+  ClearGpioPin(GPIO_04);
+  SetGpioPinDirection(GPIO_04 , GPIO_DIRECTION_IN);
 }
 
 // A function that fills the data buffer
-void DHT11_driver_write_to_buffer(char pin) {
+/*void DHT11_driver_write_to_buffer(char pin) {
   int i = 0;
 
   for (i = 0; i < BUF_LEN; i++) {
@@ -454,7 +502,7 @@ void DHT11_driver_write_to_buffer(char pin) {
     // 1 - 54us PULL_DOWN & 70us PULL_UP
     // END - 54us PULL_DOWN & >70US PULL_UP
   }
-}
+}*/
 
 /* File open function. */
 static int DHT11_driver_open(struct inode *inode, struct file *filp) {
