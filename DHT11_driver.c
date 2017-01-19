@@ -178,8 +178,7 @@ int DHT11_device_major_number;
 
 /* Blink timer vars. */
 static struct hrtimer blink_timer;
-static ktime_t kt1 , kt2;
-static ktime_t kt[85];
+
 
 #define MS_TO_NS(x) ((x)*1E6L)
 #define TIMER_SEC 0
@@ -235,7 +234,7 @@ static enum hrtimer_restart blink_timer_callback(struct hrtimer *param) {
 
 void timer_delay(ktime_t timer , int time_to_wait) {
 
-  hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+  
   timer = ktime_set(TIMER_SEC, time_to_wait);
   blink_timer.function = &blink_timer_callback;
   hrtimer_start(&blink_timer, timer, HRTIMER_MODE_REL);
@@ -369,6 +368,8 @@ void SendInitSequenceAndReciveData(char pin) {
   uint8_t i , j = 0;
   uint8_t laststate = PULL_UP;
   uint8_t counter = 0;
+  static ktime_t kt1 , kt2;
+  static ktime_t kt[85];
 
   dht11_dat[0] = dht11_dat[1] = dht11_dat[2] = dht11_dat[3] = dht11_dat[4] = 0;
 
@@ -394,7 +395,7 @@ void SendInitSequenceAndReciveData(char pin) {
           if(counter == 225) {
               break;
           }
-          printk(KERN_INFO "Current state of GPIO_4: %c" , GetGpioPinValue(pin));
+          //printk(KERN_INFO "Current state of GPIO_4: %c" , GetGpioPinValue(pin));
       }
       laststate = GetGpioPinValue(pin);
 
@@ -411,7 +412,7 @@ void SendInitSequenceAndReciveData(char pin) {
   }
 
   if ( (j >= 40) &&
-       (dht11_dat[4] == ( (dht11_dat[0] + dht11_dat[1] + dht11_dat[2] + dht11_dat[3]) & 0xFF) ) )
+      (dht11_dat[4] == ( (dht11_dat[0] + dht11_dat[1] + dht11_dat[2] + dht11_dat[3]) & 0xFF) ) )
   {
      printk(KERN_INFO "Humidity = %d.%d Temperature = %d.%d *C\n", dht11_dat[0], dht11_dat[1], dht11_dat[2], dht11_dat[3] );
   } else  {
@@ -465,7 +466,7 @@ int DHT11_driver_init(void) {
   //hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
 
   //printk(KERN_INFO "So far , so good\n");
-
+  hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
   // Initialize the device to send data
   //for(i = 0; i < 85; i++) {
   	SendInitSequenceAndReciveData(GPIO_04);
