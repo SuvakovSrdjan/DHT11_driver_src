@@ -182,12 +182,12 @@ static struct hrtimer blink_timer;
 
 #define MS_TO_NS(x) ((x)*1E6L)
 #define TIMER_SEC 0
-#define TIMER_40_us_SEC 50 * 1000        /* 40 uS delay za DHT11 */
+#define TIMER_40_us_SEC 40 * 1000        /* 40 uS delay za DHT11 */
 #define TIMER_70_us_SEC 80 * 1000        /* 70 uS */
 #define TIMER_18_us_SEC 25 * 1000        /* 18 uS */
 #define TIMER_24_us_SEC 30 * 1000        /* 24 uS */
 #define TIMER_54_us_SEC 60 * 1000        /* 54 uS */
-#define TIMER_18_ms_SEC 20 * 1000 * 1000 /* 18 mS */
+#define TIMER_18_ms_SEC 18 * 1000 * 1000 /* 18 mS */
 #define TIMER_1_us_SEC 1 * 1000 	     // 1 uS
 
 unsigned int GetGPFSELReg(char pin) {
@@ -236,8 +236,9 @@ void timer_delay(ktime_t timer , int time_to_wait) {
 
   
   timer = ktime_set(TIMER_SEC, time_to_wait);
-  blink_timer.function = &blink_timer_callback;
   hrtimer_start(&blink_timer, timer, HRTIMER_MODE_REL);
+  blink_timer.function = &blink_timer_callback;
+
 
 }
 
@@ -368,6 +369,7 @@ void SendInitSequenceAndReciveData(char pin) {
   uint8_t i , j = 0;
   uint8_t laststate = PULL_UP;
   uint8_t counter = 0;
+  //int global_counter = 0;
   static ktime_t kt1 , kt2;
   static ktime_t kt[85];
 
@@ -377,9 +379,10 @@ void SendInitSequenceAndReciveData(char pin) {
   // Init GPIO_04
   // Set GPIO_04 direction to out to send init sequence
   SetGpioPinDirection(pin, GPIO_DIRECTION_OUT);
-  //ClearGpioPin(pin);
+
   SetInternalPullUpDown(pin , PULL_DOWN);
   timer_delay(kt1 , TIMER_18_ms_SEC);
+
   SetInternalPullUpDown(pin , PULL_UP);
   timer_delay(kt2 , TIMER_40_us_SEC);
   SetGpioPinDirection(pin, GPIO_DIRECTION_IN);
@@ -388,16 +391,23 @@ void SendInitSequenceAndReciveData(char pin) {
   //Detect change and read data
   for(i = 0; i < 85; i++) {
       counter = 0;
+	  printk(KERN_INFO "Current iteration of for loop: %d" , i);
 
       while(GetGpioPinValue(pin) == laststate) {
-          counter++;
+          counter++;	
           timer_delay(kt[i] , TIMER_1_us_SEC);
           if(counter == 225) {
               break;
           }
-          //printk(KERN_INFO "Current state of GPIO_4: %c" , GetGpioPinValue(pin));
+          //printk(KERN_INFO "Counter states; local: %d , global: %d\n" , counter , global_counter);
+      }
+	  if(GetGpioPinValue(pin) == PULL_UP) {
+	printk(KERN_INFO "PULL UP\n");
+      } else {
+	printk(KERN_INFO "PULL_DOWN\n");
       }
       laststate = GetGpioPinValue(pin);
+      
 
       if(counter == 225)
         break;
@@ -410,14 +420,13 @@ void SendInitSequenceAndReciveData(char pin) {
         j++;
       }
   }
-
-  if ( (j >= 40) &&
-      (dht11_dat[4] == ( (dht11_dat[0] + dht11_dat[1] + dht11_dat[2] + dht11_dat[3]) & 0xFF) ) )
-  {
-     printk(KERN_INFO "Humidity = %d.%d Temperature = %d.%d *C\n", dht11_dat[0], dht11_dat[1], dht11_dat[2], dht11_dat[3] );
-  } else  {
-      printk(KERN_INFO "Data not good, skip\n" );
-  }
+  //if ( (j >= 40) &&
+   //   (dht11_dat[4] == ( (dht11_dat[0] + dht11_dat[1] + dht11_dat[2] + dht11_dat[3]) & 0xFF) ) )
+ // {
+     printk(KERN_INFO "Humidity = %d.%d Temperature = %d.%d *C and check sum %d\n", dht11_dat[0], dht11_dat[1], dht11_dat[2], dht11_dat[3] , dht11_dat[4]);
+ // } else  {
+  //    printk(KERN_INFO "Data not good, skip\n" );
+  //}
 }
 
 void ClearDataBuffer(void) {
@@ -436,7 +445,7 @@ void ClearDataBuffer(void) {
 // - Init GPIO Pins
 int DHT11_driver_init(void) {
   int result = -1;
-  //int i = 0;
+  int i = 0;
 
   // Registering the device
   result = register_chrdev(0, "DHT11_driver", &DHT11_driver_fops);
@@ -457,7 +466,7 @@ int DHT11_driver_init(void) {
     }
   */
   memset(DHT11_data_buffer, 0, BUF_LEN);
-  printk(KERN_INFO "Successfuly allocated memory for ring buffer\n");
+  printk(KERN_INFO "Successfuly allocated memory for buffer\n");
 
   // Initialize high resolution timer.
   //hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -468,8 +477,9 @@ int DHT11_driver_init(void) {
   //printk(KERN_INFO "So far , so good\n");
   hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
   // Initialize the device to send data
+  ClearGpioPin(GPIO_04);
   //for(i = 0; i < 85; i++) {
-  	SendInitSequenceAndReciveData(GPIO_04);
+  SendInitSequenceAndReciveData(GPIO_04);
   //}
   // Fill the data buffer here
   // TODO: odraditi u funkciji DHT11_driver_write_to_buffer(...);
